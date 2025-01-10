@@ -883,3 +883,558 @@ Here's an example of how you might implement a referral system using a database:
 Let me know if you'd like more details on any specific aspect of this.
 
 ---
+
+Thanks , but you bring code from older version of next , now we have app directory , and api reside there for server like code , so let now make it dockerize
+
+You are absolutely right! My apologies for the older `pages` directory structure. Let's modernize this with the Next.js `app` directory, create API routes within it, and then dockerize the whole thing.
+
+**1. Next.js App Directory Structure and API Routes**
+
+With the `app` directory, our file structure will change. We'll have:
+
+```
+my-app/
+├── app/
+│   ├── (mini-app)/
+│   │   └── page.jsx    // Your Mini App UI
+│   ├── api/
+│   │   ├── save-points/
+│   │   │   └── route.js   // /api/save-points route
+│   │   ├── upgrade/
+│   │   │   └── route.js  // /api/upgrade route
+│   │   ├── leaderboard/
+│   │   │   └── route.js // /api/leaderboard route
+│   │   ├── mint-tokens/
+│   │   │   └── route.js  // /api/mint-tokens route
+│   │   ├── transfer-tokens/
+│   │   │   └── route.js  // /api/transfer-tokens route
+│   │   └── referral/
+│   │       └── route.js  // /api/referral route
+│   ├── layout.js    // Root layout
+│   └── globals.css // Global styles
+├── prisma/
+│   └── schema.prisma
+├── package.json
+├── dockerfile
+└── ...
+```
+
+**Updated Code Snippets**
+
+- **Frontend (Mini App - `app/(mini-app)/page.jsx`):**
+  The frontend code stays largely the same, but we will update the paths for the api calls.
+
+  ```jsx
+  // app/(mini-app)/page.jsx
+  import React, { useState, useEffect } from "react";
+  import { useTonConnect } from "@tonconnect/ui-react";
+
+  const NotcoinApp = () => {
+    const [points, setPoints] = useState(0);
+    const [taps, setTaps] = useState(0);
+    const [multiplier, setMultiplier] = useState(1); // Start with a multiplier of 1
+    const [upgradeCost, setUpgradeCost] = useState(100);
+    const [upgradeLevel, setUpgradeLevel] = useState(0);
+    const [leaderboard, setLeaderboard] = useState([]);
+
+    const [mintMessage, setMintMessage] = useState("");
+    const [transferMessage, setTransferMessage] = useState("");
+
+    const { connected: isTonConnected } = useTonConnect();
+
+    const handleTap = () => {
+      setTaps((prevTaps) => prevTaps + 1);
+      setPoints((prevPoints) => prevPoints + multiplier);
+    };
+
+    useEffect(() => {
+      const savePoints = async () => {
+        if (taps === 0) return; // dont save on first load
+
+        const response = await fetch("/api/save-points", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ points, taps }),
+        });
+
+        if (!response.ok) {
+          console.error(
+            "Error saving points",
+            response.status,
+            response.statusText,
+          );
+          return;
+        }
+      };
+      savePoints();
+    }, [points, taps]);
+
+    useEffect(() => {
+      const fetchLeaderboard = async () => {
+        const response = await fetch("/api/leaderboard");
+        const data = await response.json();
+        setLeaderboard(data);
+      };
+
+      fetchLeaderboard();
+    }, []);
+
+    const handleUpgrade = async () => {
+      if (points < upgradeCost) {
+        alert("Not enough points!");
+        return;
+      }
+
+      const response = await fetch("/api/upgrade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ upgradeLevel }),
+      });
+
+      if (response.ok) {
+        setPoints((prevPoints) => prevPoints - upgradeCost);
+        setUpgradeCost((prevCost) => prevCost * 2); // Increase cost
+        setUpgradeLevel((prevUpgradeLevel) => prevUpgradeLevel + 1);
+        setMultiplier((prevMultiplier) => prevMultiplier * 1.5);
+      } else {
+        alert("Error during upgrade");
+      }
+    };
+
+    const handleMintToken = async () => {
+      if (!isTonConnected) {
+        alert("Please connect your wallet first.");
+        return;
+      }
+
+      const response = await fetch("/api/mint-tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ points }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setMintMessage(`Tokens minted! Tx hash: ${data.txHash}`);
+      } else {
+        setMintMessage(`Error minting tokens: ${data.error}`);
+      }
+    };
+
+    const handleTransferTokens = async () => {
+      if (!isTonConnected) {
+        alert("Please connect your wallet first.");
+        return;
+      }
+      const recipient = prompt("Enter receiver address");
+      if (!recipient) return;
+
+      const response = await fetch("/api/transfer-tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: 10, recipient }), // Example transfer of 10 tokens
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setTransferMessage(`Tokens Transfered! Tx hash: ${data.txHash}`);
+      } else {
+        setTransferMessage(`Error transfering tokens: ${data.error}`);
+      }
+    };
+
+    return (
+      <div>
+        <h1>Notcoin</h1>
+        <p>Points: {points}</p>
+        <button onClick={handleTap}>Tap!</button>
+        <p>Upgrade level {upgradeLevel}</p>
+        <button onClick={handleUpgrade} disabled={points < upgradeCost}>
+          Upgrade (Cost: {upgradeCost} points)
+        </button>
+
+        <h2>Leaderboard</h2>
+        <ul>
+          {leaderboard.map((user, index) => (
+            <li key={index}>
+              User {user.id} - Points: {user.points}
+            </li>
+          ))}
+        </ul>
+        <h2>On-Chain Integration</h2>
+        <button onClick={handleMintToken}>Mint Tokens ({points} points)</button>
+        {mintMessage && <p>{mintMessage}</p>}
+        <button onClick={handleTransferTokens}>Transfer tokens</button>
+        {transferMessage && <p>{transferMessage}</p>}
+      </div>
+    );
+  };
+
+  export default NotcoinApp;
+  ```
+
+- **Backend API Routes (Example - `app/api/save-points/route.js`):**
+
+  ```javascript
+  // app/api/save-points/route.js
+  import { PrismaClient } from "@prisma/client";
+  import { NextResponse } from "next/server";
+
+  const prisma = new PrismaClient();
+
+  export async function POST(req) {
+    try {
+      const { points, taps } = await req.json();
+      // Assuming you have a 'User' model in your Prisma schema
+      // and user identification mechanism on your backend
+      // for this example let's assume userId is passed on the query
+      const userId = 1;
+
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          points: points,
+          taps: taps,
+        },
+      });
+
+      return NextResponse.json(
+        { message: "Points saved successfully" },
+        { status: 200 },
+      );
+    } catch (error) {
+      console.error("Error saving points", error);
+      return NextResponse.json(
+        { error: "Failed to save points" },
+        { status: 500 },
+      );
+    }
+  }
+  ```
+
+- **Backend API Routes (Example - `app/api/leaderboard/route.js`):**
+
+
+    ```javascript
+    // app/api/leaderboard/route.js
+    import { PrismaClient } from '@prisma/client';
+    import { NextResponse } from 'next/server';
+
+    const prisma = new PrismaClient();
+
+    export async function GET() {
+      try {
+          const leaderboard = await prisma.user.findMany({
+              orderBy: { points: 'desc' },
+              take: 10
+          });
+          return NextResponse.json(leaderboard, { status: 200 });
+      } catch (error) {
+          console.error('Error fetching leaderboard', error);
+          return NextResponse.json({ error: 'Failed to fetch leaderboard' }, { status: 500 });
+      }
+    }
+    ```
+
+    *  **Backend API Routes (Example - `app/api/upgrade/route.js`):**
+
+     ```javascript
+    // app/api/upgrade/route.js
+        import { PrismaClient } from '@prisma/client';
+        import { NextResponse } from 'next/server';
+
+
+        const prisma = new PrismaClient();
+
+    export async function POST(req) {
+         try {
+                 const {upgradeLevel} = await req.json();
+                const userId = 1;
+
+            const user = await prisma.user.update({
+                where: { id: userId },
+                data: {
+                   upgradeLevel: upgradeLevel + 1,
+                }
+            });
+                return NextResponse.json({ message: 'Upgrade successful' }, { status: 200 });
+         } catch (error) {
+                 console.error('Error upgrading user', error);
+                return NextResponse.json({ error: 'Failed to save points' }, { status: 500 });
+           }
+
+     }
+    ```
+
+    *  **Backend API Routes (Example - `app/api/mint-tokens/route.js`):**
+
+      ```javascript
+     // app/api/mint-tokens/route.js
+    import { TonClient, WalletContractV4, internal, Cell} from 'ton';
+    import { mnemonicToWalletKey } from 'ton-crypto';
+    import { getHttpEndpoint } from '@orbs-network/ton-access';
+       import { contractAddress } from '../contract.config' // Your Contract address
+        import { NextResponse } from 'next/server';
+
+    const MNEMONIC = process.env.MNEMONIC;
+
+     export async function POST(req) {
+         try {
+           const {points} = await req.json()
+
+
+            const endpoint = await getHttpEndpoint();
+            const client = new TonClient({ endpoint });
+
+              const key = await mnemonicToWalletKey(MNEMONIC.split(' '));
+             const wallet = WalletContractV4.create({
+                 publicKey: key.publicKey,
+                 workchain: 0,
+             });
+
+            const seqno = await wallet.getSeqno(client);
+
+            const mint = wallet.createTransfer({
+                secretKey: key.secretKey,
+                  seqno: seqno,
+                 messages: [
+                     internal({
+                         to: contractAddress, // Contract address
+                            value: '0.1', // minimal value for gas fees
+                          body: Cell.from('mint', { amount: points , recipient : wallet.address}).toBoc() // Contract method
+                      }),
+                  ],
+            });
+        const signed = await wallet.sign(mint);
+
+
+          const tx = await client.sendExternalMessage(wallet, signed);
+
+
+            return NextResponse.json({ txHash: tx.hash }, { status: 200 });
+         } catch (error) {
+             console.error('Error minting tokens', error);
+             return NextResponse.json({ error: 'Failed to mint tokens' }, { status: 500 });
+            }
+       }
+      ```
+    *  **Backend API Routes (Example - `app/api/transfer-tokens/route.js`):**
+
+    ```javascript
+     // app/api/transfer-tokens/route.js
+    import { TonClient, WalletContractV4, internal, Cell, Address} from 'ton';
+    import { mnemonicToWalletKey } from 'ton-crypto';
+    import { getHttpEndpoint } from '@orbs-network/ton-access';
+    import { contractAddress } from '../contract.config' // Your Contract address
+      import { NextResponse } from 'next/server';
+
+    const MNEMONIC = process.env.MNEMONIC;
+
+     export async function POST(req) {
+          try {
+              const {amount, recipient} = await req.json()
+
+
+                const endpoint = await getHttpEndpoint();
+              const client = new TonClient({ endpoint });
+
+               const key = await mnemonicToWalletKey(MNEMONIC.split(' '));
+               const wallet = WalletContractV4.create({
+                  publicKey: key.publicKey,
+                   workchain: 0,
+                });
+
+                const seqno = await wallet.getSeqno(client);
+
+
+                  const transfer = wallet.createTransfer({
+                    secretKey: key.secretKey,
+                      seqno: seqno,
+                    messages: [
+                            internal({
+                                to: contractAddress, // Contract address
+                                value: '0.1', // minimal value for gas fees
+                                    body: Cell.from('transfer', { amount: amount , recipient : new Address(recipient)}).toBoc() // Contract method
+                            }),
+                    ],
+                  });
+                  const signed = await wallet.sign(transfer);
+
+
+                const tx = await client.sendExternalMessage(wallet, signed);
+                  return NextResponse.json({ txHash: tx.hash }, { status: 200 });
+           } catch (error) {
+                console.error('Error minting tokens', error);
+               return NextResponse.json({ error: 'Failed to mint tokens' }, { status: 500 });
+           }
+      }
+     ```
+
+    *  **Backend API Routes (Example - `app/api/referral/route.js`):**
+
+        ```javascript
+      // app/api/referral/route.js
+        import { PrismaClient } from '@prisma/client';
+        import { NextResponse } from 'next/server';
+        const prisma = new PrismaClient();
+
+        export async function POST(req) {
+             const { referrerId, referredId } = await req.json()
+            if (!referrerId || !referredId) {
+                 return NextResponse.json({ error: 'Referrer and referred user IDs are required' }, { status: 400 });
+                }
+           try {
+                    // Save the referred user info
+                await prisma.user.update({
+                    where: { id: referredId },
+                        data: {
+                            referredBy: referrerId
+                        },
+                });
+
+                // Bonus points to referrer
+                await prisma.user.update({
+                    where: {id : referrerId},
+                    data: { points : { increment : 1000}} // Or your required bonus points for referrals
+                });
+
+                 // Bonus points to referred user
+                 await prisma.user.update({
+                      where: {id : referredId},
+                    data: { points : { increment : 500}} // Or your required bonus points for referrals
+                  });
+
+
+                return NextResponse.json({ message: 'Referral recorded successfully' }, { status: 200 });
+            } catch (error) {
+                console.error('Error recording referral', error);
+               return NextResponse.json({ error: 'Failed to record referral' }, { status: 500 });
+             }
+        }
+
+    ```
+
+- **`app/api/contract.config.js`** - Remains the same
+
+  ```javascript
+  export const contractAddress =
+    "EQB59jZqI165y5Z36Y4-B5zZ5bJ0L3y8v7w1-N5g71f7dC04"; // Replace with your contract address
+  ```
+
+**Important Changes:**
+
+- **`route.js`:** API routes are now defined in `route.js` files inside the `app/api/...` directories.
+- **`NextResponse`:** We are using `NextResponse` from `next/server` to send JSON responses.
+- **`req.json()`:** We're using `await req.json()` to extract the request body.
+
+**2. Dockerfile**
+
+Create a `Dockerfile` in the root directory of your project:
+
+```dockerfile
+# Use the official Node.js image as a base
+FROM node:18-alpine
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy package.json and package-lock.json
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy the rest of the application code
+COPY . .
+
+# Build the Next.js application
+RUN npm run build
+
+# Expose the port the app will run on
+EXPOSE 3000
+
+# Command to start the application
+CMD ["npm", "start"]
+```
+
+**Explanation:**
+
+- **`FROM node:18-alpine`:** Uses a lightweight Node.js image.
+- **`WORKDIR /app`:** Sets the working directory inside the container.
+- **`COPY package*.json ./`:** Copies only the package files to speed up builds (cache layers).
+- **`RUN npm install`:** Installs dependencies.
+- **`COPY . .`:** Copies the entire project after the dependencies.
+- **`RUN npm run build`:** Builds the Next.js app.
+- **`EXPOSE 3000`:** Exposes port 3000, the port Next.js uses by default.
+- **`CMD ["npm", "start"]`:** Starts the Next.js app in production.
+
+**3. Docker Compose (Optional)**
+
+For more complex setups, you might want to use Docker Compose to manage your database and application together. Here's a basic `docker-compose.yml` example:
+
+```yaml
+version: "3.8"
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/mydb
+      - MNEMONIC=${MNEMONIC}
+    # Use host network for telegram mini app
+    network_mode: "host"
+  db:
+    image: postgres:14-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydb
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+volumes:
+  db_data:
+```
+
+**Explanation:**
+
+- **`web` service:** Builds the application using the `Dockerfile` and runs it on port 3000. It depends on the `db` service.
+- **`db` service:** Runs a Postgres database container using the image and exposes port 5432.
+- **Volumes:** A persistent volume is defined for database data.
+- **Environment Variables:** You set environment variables for database connection. You will need to define `MNEMONIC` environment variable as well when starting the docker container.
+- **Network Mode**: Using host network because mini-apps require this for Telegram to access the app when testing locally.
+
+**How to Build and Run**
+
+1.  **Build the Docker image:**
+
+    ```bash
+    docker build -t my-nextjs-app .
+    ```
+
+2.  **Run the Docker container (without docker compose):**
+
+    ```bash
+    docker run -p 3000:3000 -e MNEMONIC="your_mnemonic_here" my-nextjs-app
+    ```
+
+3.  **Run with Docker Compose (Optional):**
+    ```bash
+    docker compose up -d
+    ```
+
+**Important Notes:**
+
+- **Environment Variables:** Set your `DATABASE_URL`, `MNEMONIC` and other necessary environment variables.
+- **Prisma:** Make sure to run `npx prisma migrate dev` to apply database migrations.
+- **Security:** For production, use a more secure approach for handling credentials (e.g., Docker secrets).
+- **Network:** Ensure that the mini-app can access the backend, in case it is exposed to the same network.
+
+This comprehensive setup should provide you with a clear picture of how to use the `app` directory, create API routes, and dockerize your Next.js application, ready for deploying to a container orchestration solution. Let me know if you have further questions or need more specific details.
