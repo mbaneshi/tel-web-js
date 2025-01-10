@@ -1116,205 +1116,218 @@ my-app/
 
 - **Backend API Routes (Example - `app/api/leaderboard/route.js`):**
 
+  ```javascript
+  // app/api/leaderboard/route.js
+  import { PrismaClient } from "@prisma/client";
+  import { NextResponse } from "next/server";
 
-    ```javascript
-    // app/api/leaderboard/route.js
-    import { PrismaClient } from '@prisma/client';
-    import { NextResponse } from 'next/server';
+  const prisma = new PrismaClient();
 
-    const prisma = new PrismaClient();
-
-    export async function GET() {
-      try {
-          const leaderboard = await prisma.user.findMany({
-              orderBy: { points: 'desc' },
-              take: 10
-          });
-          return NextResponse.json(leaderboard, { status: 200 });
-      } catch (error) {
-          console.error('Error fetching leaderboard', error);
-          return NextResponse.json({ error: 'Failed to fetch leaderboard' }, { status: 500 });
-      }
+  export async function GET() {
+    try {
+      const leaderboard = await prisma.user.findMany({
+        orderBy: { points: "desc" },
+        take: 10,
+      });
+      return NextResponse.json(leaderboard, { status: 200 });
+    } catch (error) {
+      console.error("Error fetching leaderboard", error);
+      return NextResponse.json(
+        { error: "Failed to fetch leaderboard" },
+        { status: 500 },
+      );
     }
-    ```
+  }
+  ```
 
-    *  **Backend API Routes (Example - `app/api/upgrade/route.js`):**
+  - **Backend API Routes (Example - `app/api/upgrade/route.js`):**
 
-     ```javascript
-    // app/api/upgrade/route.js
-        import { PrismaClient } from '@prisma/client';
-        import { NextResponse } from 'next/server';
+  ```javascript
+  // app/api/upgrade/route.js
+  import { PrismaClient } from "@prisma/client";
+  import { NextResponse } from "next/server";
+
+  const prisma = new PrismaClient();
+
+  export async function POST(req) {
+    try {
+      const { upgradeLevel } = await req.json();
+      const userId = 1;
+
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          upgradeLevel: upgradeLevel + 1,
+        },
+      });
+      return NextResponse.json(
+        { message: "Upgrade successful" },
+        { status: 200 },
+      );
+    } catch (error) {
+      console.error("Error upgrading user", error);
+      return NextResponse.json(
+        { error: "Failed to save points" },
+        { status: 500 },
+      );
+    }
+  }
+  ```
+
+  - **Backend API Routes (Example - `app/api/mint-tokens/route.js`):**
+
+  ````javascript
+  // app/api/mint-tokens/route.js
+  import { TonClient, WalletContractV4, internal, Cell} from 'ton';
+  import { mnemonicToWalletKey } from 'ton-crypto';
+  import { getHttpEndpoint } from '@orbs-network/ton-access';
+    import { contractAddress } from '../contract.config' // Your Contract address
+     import { NextResponse } from 'next/server';
+
+  const MNEMONIC = process.env.MNEMONIC;
+
+  export async function POST(req) {
+      try {
+        const {points} = await req.json()
 
 
-        const prisma = new PrismaClient();
+         const endpoint = await getHttpEndpoint();
+         const client = new TonClient({ endpoint });
 
-    export async function POST(req) {
-         try {
-                 const {upgradeLevel} = await req.json();
-                const userId = 1;
+           const key = await mnemonicToWalletKey(MNEMONIC.split(' '));
+          const wallet = WalletContractV4.create({
+              publicKey: key.publicKey,
+              workchain: 0,
+          });
 
-            const user = await prisma.user.update({
-                where: { id: userId },
-                data: {
-                   upgradeLevel: upgradeLevel + 1,
-                }
-            });
-                return NextResponse.json({ message: 'Upgrade successful' }, { status: 200 });
-         } catch (error) {
-                 console.error('Error upgrading user', error);
-                return NextResponse.json({ error: 'Failed to save points' }, { status: 500 });
-           }
+         const seqno = await wallet.getSeqno(client);
 
-     }
-    ```
-
-    *  **Backend API Routes (Example - `app/api/mint-tokens/route.js`):**
-
-      ```javascript
-     // app/api/mint-tokens/route.js
-    import { TonClient, WalletContractV4, internal, Cell} from 'ton';
-    import { mnemonicToWalletKey } from 'ton-crypto';
-    import { getHttpEndpoint } from '@orbs-network/ton-access';
-       import { contractAddress } from '../contract.config' // Your Contract address
-        import { NextResponse } from 'next/server';
-
-    const MNEMONIC = process.env.MNEMONIC;
-
-     export async function POST(req) {
-         try {
-           const {points} = await req.json()
+         const mint = wallet.createTransfer({
+             secretKey: key.secretKey,
+               seqno: seqno,
+              messages: [
+                  internal({
+                      to: contractAddress, // Contract address
+                         value: '0.1', // minimal value for gas fees
+                       body: Cell.from('mint', { amount: points , recipient : wallet.address}).toBoc() // Contract method
+                   }),
+               ],
+         });
+     const signed = await wallet.sign(mint);
 
 
-            const endpoint = await getHttpEndpoint();
-            const client = new TonClient({ endpoint });
+       const tx = await client.sendExternalMessage(wallet, signed);
 
-              const key = await mnemonicToWalletKey(MNEMONIC.split(' '));
-             const wallet = WalletContractV4.create({
-                 publicKey: key.publicKey,
-                 workchain: 0,
+
+         return NextResponse.json({ txHash: tx.hash }, { status: 200 });
+      } catch (error) {
+          console.error('Error minting tokens', error);
+          return NextResponse.json({ error: 'Failed to mint tokens' }, { status: 500 });
+         }
+    }
+   ```
+  *  **Backend API Routes (Example - `app/api/transfer-tokens/route.js`):**
+
+  ```javascript
+  // app/api/transfer-tokens/route.js
+  import { TonClient, WalletContractV4, internal, Cell, Address} from 'ton';
+  import { mnemonicToWalletKey } from 'ton-crypto';
+  import { getHttpEndpoint } from '@orbs-network/ton-access';
+  import { contractAddress } from '../contract.config' // Your Contract address
+   import { NextResponse } from 'next/server';
+
+  const MNEMONIC = process.env.MNEMONIC;
+
+  export async function POST(req) {
+       try {
+           const {amount, recipient} = await req.json()
+
+
+             const endpoint = await getHttpEndpoint();
+           const client = new TonClient({ endpoint });
+
+            const key = await mnemonicToWalletKey(MNEMONIC.split(' '));
+            const wallet = WalletContractV4.create({
+               publicKey: key.publicKey,
+                workchain: 0,
              });
 
-            const seqno = await wallet.getSeqno(client);
+             const seqno = await wallet.getSeqno(client);
 
-            const mint = wallet.createTransfer({
-                secretKey: key.secretKey,
-                  seqno: seqno,
+
+               const transfer = wallet.createTransfer({
+                 secretKey: key.secretKey,
+                   seqno: seqno,
                  messages: [
-                     internal({
-                         to: contractAddress, // Contract address
-                            value: '0.1', // minimal value for gas fees
-                          body: Cell.from('mint', { amount: points , recipient : wallet.address}).toBoc() // Contract method
-                      }),
-                  ],
-            });
-        const signed = await wallet.sign(mint);
+                         internal({
+                             to: contractAddress, // Contract address
+                             value: '0.1', // minimal value for gas fees
+                                 body: Cell.from('transfer', { amount: amount , recipient : new Address(recipient)}).toBoc() // Contract method
+                         }),
+                 ],
+               });
+               const signed = await wallet.sign(transfer);
 
 
-          const tx = await client.sendExternalMessage(wallet, signed);
-
-
-            return NextResponse.json({ txHash: tx.hash }, { status: 200 });
-         } catch (error) {
+             const tx = await client.sendExternalMessage(wallet, signed);
+               return NextResponse.json({ txHash: tx.hash }, { status: 200 });
+        } catch (error) {
              console.error('Error minting tokens', error);
-             return NextResponse.json({ error: 'Failed to mint tokens' }, { status: 500 });
-            }
-       }
-      ```
-    *  **Backend API Routes (Example - `app/api/transfer-tokens/route.js`):**
-
-    ```javascript
-     // app/api/transfer-tokens/route.js
-    import { TonClient, WalletContractV4, internal, Cell, Address} from 'ton';
-    import { mnemonicToWalletKey } from 'ton-crypto';
-    import { getHttpEndpoint } from '@orbs-network/ton-access';
-    import { contractAddress } from '../contract.config' // Your Contract address
-      import { NextResponse } from 'next/server';
-
-    const MNEMONIC = process.env.MNEMONIC;
-
-     export async function POST(req) {
-          try {
-              const {amount, recipient} = await req.json()
-
-
-                const endpoint = await getHttpEndpoint();
-              const client = new TonClient({ endpoint });
-
-               const key = await mnemonicToWalletKey(MNEMONIC.split(' '));
-               const wallet = WalletContractV4.create({
-                  publicKey: key.publicKey,
-                   workchain: 0,
-                });
-
-                const seqno = await wallet.getSeqno(client);
-
-
-                  const transfer = wallet.createTransfer({
-                    secretKey: key.secretKey,
-                      seqno: seqno,
-                    messages: [
-                            internal({
-                                to: contractAddress, // Contract address
-                                value: '0.1', // minimal value for gas fees
-                                    body: Cell.from('transfer', { amount: amount , recipient : new Address(recipient)}).toBoc() // Contract method
-                            }),
-                    ],
-                  });
-                  const signed = await wallet.sign(transfer);
-
-
-                const tx = await client.sendExternalMessage(wallet, signed);
-                  return NextResponse.json({ txHash: tx.hash }, { status: 200 });
-           } catch (error) {
-                console.error('Error minting tokens', error);
-               return NextResponse.json({ error: 'Failed to mint tokens' }, { status: 500 });
-           }
-      }
-     ```
-
-    *  **Backend API Routes (Example - `app/api/referral/route.js`):**
-
-        ```javascript
-      // app/api/referral/route.js
-        import { PrismaClient } from '@prisma/client';
-        import { NextResponse } from 'next/server';
-        const prisma = new PrismaClient();
-
-        export async function POST(req) {
-             const { referrerId, referredId } = await req.json()
-            if (!referrerId || !referredId) {
-                 return NextResponse.json({ error: 'Referrer and referred user IDs are required' }, { status: 400 });
-                }
-           try {
-                    // Save the referred user info
-                await prisma.user.update({
-                    where: { id: referredId },
-                        data: {
-                            referredBy: referrerId
-                        },
-                });
-
-                // Bonus points to referrer
-                await prisma.user.update({
-                    where: {id : referrerId},
-                    data: { points : { increment : 1000}} // Or your required bonus points for referrals
-                });
-
-                 // Bonus points to referred user
-                 await prisma.user.update({
-                      where: {id : referredId},
-                    data: { points : { increment : 500}} // Or your required bonus points for referrals
-                  });
-
-
-                return NextResponse.json({ message: 'Referral recorded successfully' }, { status: 200 });
-            } catch (error) {
-                console.error('Error recording referral', error);
-               return NextResponse.json({ error: 'Failed to record referral' }, { status: 500 });
-             }
+            return NextResponse.json({ error: 'Failed to mint tokens' }, { status: 500 });
         }
+   }
+  ````
 
-    ```
+  - **Backend API Routes (Example - `app/api/referral/route.js`):**
+
+  ```javascript
+  // app/api/referral/route.js
+  import { PrismaClient } from "@prisma/client";
+  import { NextResponse } from "next/server";
+  const prisma = new PrismaClient();
+
+  export async function POST(req) {
+    const { referrerId, referredId } = await req.json();
+    if (!referrerId || !referredId) {
+      return NextResponse.json(
+        { error: "Referrer and referred user IDs are required" },
+        { status: 400 },
+      );
+    }
+    try {
+      // Save the referred user info
+      await prisma.user.update({
+        where: { id: referredId },
+        data: {
+          referredBy: referrerId,
+        },
+      });
+
+      // Bonus points to referrer
+      await prisma.user.update({
+        where: { id: referrerId },
+        data: { points: { increment: 1000 } }, // Or your required bonus points for referrals
+      });
+
+      // Bonus points to referred user
+      await prisma.user.update({
+        where: { id: referredId },
+        data: { points: { increment: 500 } }, // Or your required bonus points for referrals
+      });
+
+      return NextResponse.json(
+        { message: "Referral recorded successfully" },
+        { status: 200 },
+      );
+    } catch (error) {
+      console.error("Error recording referral", error);
+      return NextResponse.json(
+        { error: "Failed to record referral" },
+        { status: 500 },
+      );
+    }
+  }
+  ```
 
 - **`app/api/contract.config.js`** - Remains the same
 
