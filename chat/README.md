@@ -276,3 +276,260 @@ export default async function handler(req, res) {
 This example should give you a solid starting point. Remember to thoroughly test your application, pay close attention to security, and tailor it to your specific needs. Let me know if you have any further questions!
 
 ---
+
+make sense , now try to expalain nitty gritty technical aspect of notcoin app , or hamster app , how they use my stack to reach this functionality , focus mainly on providing code snippet please
+
+Okay, let's delve into the nitty-gritty technical aspects of how apps like Notcoin or Hamster Kombat might utilize the stack we've been discussing (Telegram Mini App with Next.js, Postgres, TON Smart Contracts, TON Connect, TON SDK) with a focus on code snippets to illustrate key functionality.
+
+**Core Functionality of Clicker Games like Notcoin/Hamster Kombat**
+
+1.  **Tap/Click Tracking:** The core mechanic is tracking user taps/clicks.
+2.  **Points/Currency:** Users earn in-game points/currency based on their tapping activity.
+3.  **Upgrades/Boosts:** Users can spend their earned currency on upgrades and boosts that improve their earning rate.
+4.  **Leaderboard/Ranking:** Display a leaderboard of top-performing users.
+5.  **On-Chain Integration:** Integrate on-chain transactions (minting, transfers, etc.)
+6.  **Referral/Invite Systems:** Bonus system for inviting other users.
+
+**Technical Implementation with Code Snippets**
+
+Let's break down each of these components and illustrate how they might be implemented using our stack.
+
+**1. Tap/Click Tracking and Points**
+
+- **Frontend (Next.js Mini App):**
+
+  ```jsx
+  // pages/mini-app/index.js
+  import React, { useState, useEffect } from "react";
+
+  const NotcoinApp = () => {
+    const [points, setPoints] = useState(0);
+    const [taps, setTaps] = useState(0);
+    const [multiplier, setMultiplier] = useState(1); // Start with a multiplier of 1
+
+    const handleTap = () => {
+      setTaps((prevTaps) => prevTaps + 1);
+      setPoints((prevPoints) => prevPoints + multiplier);
+    };
+
+    useEffect(() => {
+      const savePoints = async () => {
+        if (taps === 0) return; // dont save on first load
+
+        const response = await fetch("/api/save-points", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ points, taps }),
+        });
+
+        if (!response.ok) {
+          console.error(
+            "Error saving points",
+            response.status,
+            response.statusText,
+          );
+          return;
+        }
+      };
+      savePoints();
+    }, [points, taps]);
+
+    return (
+      <div>
+        <h1>Notcoin</h1>
+        <p>Points: {points}</p>
+        <button onClick={handleTap}>Tap!</button>
+      </div>
+    );
+  };
+
+  export default NotcoinApp;
+  ```
+
+- **Backend (Next.js API Route - `pages/api/save-points.js`):**
+
+  ```javascript
+  // pages/api/save-points.js
+  import { PrismaClient } from "@prisma/client";
+
+  const prisma = new PrismaClient();
+
+  export default async function handler(req, res) {
+    if (req.method === "POST") {
+      try {
+        const { points, taps } = req.body;
+        // Assuming you have a 'User' model in your Prisma schema
+        // and user identification mechanism on your backend
+        // for this example let's assume userId is passed on the query
+        const userId = 1;
+
+        const user = await prisma.user.update({
+          where: { id: userId },
+          data: {
+            points: points,
+            taps: taps,
+          },
+        });
+
+        res.status(200).json({ message: "Points saved successfully" });
+      } catch (error) {
+        console.error("Error saving points", error);
+        res.status(500).json({ error: "Failed to save points" });
+      }
+    } else {
+      res.status(405).json({ error: "Method not allowed" });
+    }
+  }
+  ```
+
+**2. Upgrades/Boosts**
+
+- **Frontend (Next.js Mini App):**
+
+  ```jsx
+  // Inside NotcoinApp component
+  const [upgradeCost, setUpgradeCost] = useState(100);
+  const [upgradeLevel, setUpgradeLevel] = useState(0);
+
+  const handleUpgrade = async () => {
+    if (points < upgradeCost) {
+      alert("Not enough points!");
+      return;
+    }
+
+    const response = await fetch("/api/upgrade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ upgradeLevel }),
+    });
+
+    if (response.ok) {
+      setPoints((prevPoints) => prevPoints - upgradeCost);
+      setUpgradeCost((prevCost) => prevCost * 2); // Increase cost
+      setUpgradeLevel((prevUpgradeLevel) => prevUpgradeLevel + 1);
+      setMultiplier((prevMultiplier) => prevMultiplier * 1.5);
+    } else {
+      alert("Error during upgrade");
+    }
+  };
+
+  // In JSX return
+  <div>
+    {/* other UI elements here */}
+    <p>Upgrade level {upgradeLevel}</p>
+    <button onClick={handleUpgrade} disabled={points < upgradeCost}>
+      Upgrade (Cost: {upgradeCost} points)
+    </button>
+  </div>;
+  ```
+
+- **Backend (Next.js API Route - `pages/api/upgrade.js`):**
+
+  ```javascript
+  // pages/api/upgrade.js
+  import { PrismaClient } from "@prisma/client";
+
+  const prisma = new PrismaClient();
+
+  export default async function handler(req, res) {
+    if (req.method === "POST") {
+      try {
+        const { upgradeLevel } = req.body;
+        const userId = 1;
+
+        const user = await prisma.user.update({
+          where: { id: userId },
+          data: {
+            upgradeLevel: upgradeLevel + 1,
+          },
+        });
+
+        res.status(200).json({ message: "Upgrade successful" });
+      } catch (error) {
+        console.error("Error upgrading user", error);
+        res.status(500).json({ error: "Failed to save points" });
+      }
+    } else {
+      res.status(405).json({ error: "Method not allowed" });
+    }
+  }
+  ```
+
+**3. Leaderboard**
+
+- **Frontend (Next.js Mini App):**
+
+  ```jsx
+  // Inside NotcoinApp component
+  const [leaderboard, setLeaderboard] = useState([]);
+
+  useEffect(() => {
+      const fetchLeaderboard = async () => {
+          const response = await fetch('/api/leaderboard');
+          const data = await response.json();
+          setLeaderboard(data);
+      };
+
+      fetchLeaderboard();
+  }, []);
+  // In JSX return
+  {/* other UI elements here */}
+      <h2>Leaderboard</h2>
+      <ul>
+          {leaderboard.map((user, index) => (
+              <li key={index}>
+                  User {user.id} - Points: {user.points}
+              </li>
+          ))}
+      </ul>
+  ```
+
+- **Backend (Next.js API Route - `pages/api/leaderboard.js`):**
+
+  ```javascript
+  // pages/api/leaderboard.js
+  import { PrismaClient } from "@prisma/client";
+
+  const prisma = new PrismaClient();
+
+  export default async function handler(req, res) {
+    if (req.method === "GET") {
+      try {
+        const leaderboard = await prisma.user.findMany({
+          orderBy: { points: "desc" },
+          take: 10,
+        });
+        res.status(200).json(leaderboard);
+      } catch (error) {
+        console.error("Error fetching leaderboard", error);
+        res.status(500).json({ error: "Failed to fetch leaderboard" });
+      }
+    } else {
+      res.status(405).json({ error: "Method not allowed" });
+    }
+  }
+  ```
+
+**4. On-Chain Integration**
+
+- This part would involve the same TON Connect and TON SDK flow we discussed in the previous response. You would use it for minting tokens (if you are providing a custom currency) or allowing users to transfer their earned in game points to real currency using the blockchain.
+
+**5. Referral/Invite Systems**
+
+    *   These usually involve saving the referral on the database and incrementing the points/balance for both users on success.
+
+**Key Considerations**
+
+- **Prisma (or similar ORM):** This example uses Prisma for database interaction. You can use other ORMs or direct SQL queries.
+- **User Identification:** You'll need a mechanism to identify users (e.g., using a session or a Telegram user ID).
+- **Real-time updates:** For a real-time leaderboard or updating a points count, you might consider using web sockets.
+- **Scalability:** Optimise your database queries and application logic for handling many users.
+- **Smart Contract:** The on-chain functionality will depend on your smart contract's design. You'll need to interact with it using the TON SDK.
+
+**Important Notes:**
+
+- This is a simplified example, you'll need to adapt it for your specific application.
+- Error handling, input validation, and security are crucial in production.
+- Add more details in the database like date created or last interaction to handle cases where the user hasn't closed the mini-app and points are not saved.
+
+Let me know if you want a more detailed example of the on-chain integration part!
