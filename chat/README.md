@@ -533,3 +533,353 @@ Let's break down each of these components and illustrate how they might be imple
 - Add more details in the database like date created or last interaction to handle cases where the user hasn't closed the mini-app and points are not saved.
 
 Let me know if you want a more detailed example of the on-chain integration part!
+
+---
+
+thanks , now lets go deep in 4. On-Chain Integration
+
+    This part would involve the same TON Connect and TON SDK flow we discussed in the previous response. You would use it for minting tokens (if you are providing a custom currency) or allowing users to transfer their earned in game points to real currency using the blockchain.
+
+5. Referral/Invite Systems
+
+- These usually involve saving the referral on the database and incrementing the points/balance for both users on success.
+
+---
+
+Okay, let's dive deep into the specifics of on-chain integration and referral systems, providing more detailed code examples and explanations.
+
+**4. On-Chain Integration (Minting Tokens and Transfers)**
+
+Let's assume you want to create a custom token within your game that can be minted for in-game points and transferred to other users. This involves:
+
+- **Smart Contract:** You'll need a smart contract on the TON blockchain to handle the token minting and transfers.
+- **TON Connect for Wallet Connection:** Users must connect their wallets to interact with the smart contract.
+- **TON SDK for Interaction:** You'll use the TON SDK to communicate with the smart contract from your backend.
+
+**Smart Contract (Simplified Example - FunC/Tact - Abstract Example):**
+
+```tact
+// This is a simplified illustration and will need to be adapted for your actual use case.
+// This example uses Tact for easier readablity.
+
+contract Token {
+    // Storage variables
+    int total_supply = 0;
+    map<address, int> balances;
+
+    // Public functions
+
+    // Function to get the balance of a user.
+    get fun balance_of(address user) {
+        return balances.get(user, 0);
+    }
+
+   // Function to mint tokens. Only contract owner can call this
+    receive("mint") fun mintTokens(int amount, address recipient) {
+        require(sender() == contract_address());
+        balances.set(recipient, balances.get(recipient, 0) + amount);
+        total_supply = total_supply + amount;
+    }
+
+
+    // Function to transfer tokens
+    receive("transfer") fun transferTokens(address recipient, int amount) {
+        require(balances.get(sender(), 0) >= amount);
+        balances.set(sender(), balances.get(sender(), 0) - amount);
+        balances.set(recipient, balances.get(recipient, 0) + amount);
+    }
+}
+```
+
+**Explanation:**
+
+- **`total_supply`:** Keeps track of the total number of tokens in circulation.
+- **`balances`:** A mapping of addresses to their token balances.
+- **`mintTokens`:** A function (only callable by the contract itself for demonstration) for minting new tokens to users, often used when converting in-game currency or providing referral rewards.
+- **`transferTokens`:** A function for transferring tokens between users.
+
+**Implementation (with TON SDK)**
+
+- **Frontend (Mini App - Next.js):**
+
+  ```jsx
+  // pages/mini-app/index.js
+  import React, { useState } from "react";
+  import { useTonConnect } from "@tonconnect/ui-react";
+
+  const OnChainFeatures = ({ points }) => {
+    const [mintMessage, setMintMessage] = useState("");
+    const [transferMessage, setTransferMessage] = useState("");
+    const { connected: isTonConnected } = useTonConnect();
+
+    const handleMintToken = async () => {
+      if (!isTonConnected) {
+        alert("Please connect your wallet first.");
+        return;
+      }
+
+      const response = await fetch("/api/mint-tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ points }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setMintMessage(`Tokens minted! Tx hash: ${data.txHash}`);
+      } else {
+        setMintMessage(`Error minting tokens: ${data.error}`);
+      }
+    };
+
+    const handleTransferTokens = async () => {
+      if (!isTonConnected) {
+        alert("Please connect your wallet first.");
+        return;
+      }
+      const recipient = prompt("Enter receiver address");
+      if (!recipient) return;
+
+      const response = await fetch("/api/transfer-tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: 10, recipient }), // Example transfer of 10 tokens
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setTransferMessage(`Tokens Transfered! Tx hash: ${data.txHash}`);
+      } else {
+        setTransferMessage(`Error transfering tokens: ${data.error}`);
+      }
+    };
+
+    return (
+      <div>
+        <h2>On-Chain Integration</h2>
+        <button onClick={handleMintToken}>Mint Tokens ({points} points)</button>
+        {mintMessage && <p>{mintMessage}</p>}
+        <button onClick={handleTransferTokens}>Transfer tokens</button>
+        {transferMessage && <p>{transferMessage}</p>}
+      </div>
+    );
+  };
+  export default OnChainFeatures;
+  ```
+
+- **Backend (Next.js API Routes - `pages/api/mint-tokens.js` and `pages/api/transfer-tokens.js`):**
+
+  ```javascript
+  // pages/api/mint-tokens.js
+  import { TonClient, WalletContractV4, internal, Cell, Address } from "ton";
+  import { mnemonicToWalletKey } from "ton-crypto";
+  import { getHttpEndpoint } from "@orbs-network/ton-access";
+  import { contractAddress } from "./contract.config"; // Your Contract address
+
+  const MNEMONIC = process.env.MNEMONIC;
+
+  export default async function handler(req, res) {
+    if (req.method === "POST") {
+      try {
+        const { points } = req.body;
+
+        const endpoint = await getHttpEndpoint();
+        const client = new TonClient({ endpoint });
+
+        const key = await mnemonicToWalletKey(MNEMONIC.split(" "));
+        const wallet = WalletContractV4.create({
+          publicKey: key.publicKey,
+          workchain: 0,
+        });
+
+        const seqno = await wallet.getSeqno(client);
+
+        const mint = wallet.createTransfer({
+          secretKey: key.secretKey,
+          seqno: seqno,
+          messages: [
+            internal({
+              to: contractAddress, // Contract address
+              value: "0.1", // minimal value for gas fees
+              body: Cell.from("mint", {
+                amount: points,
+                recipient: wallet.address,
+              }).toBoc(), // Contract method
+            }),
+          ],
+        });
+        const signed = await wallet.sign(mint);
+
+        const tx = await client.sendExternalMessage(wallet, signed);
+
+        res.status(200).json({ txHash: tx.hash });
+      } catch (error) {
+        console.error("Error minting tokens", error);
+        res.status(500).json({ error: "Failed to mint tokens" });
+      }
+    } else {
+      res.status(405).json({ error: "Method not allowed" });
+    }
+  }
+  ```
+
+  ```javascript
+  // pages/api/transfer-tokens.js
+  import { TonClient, WalletContractV4, internal, Cell, Address } from "ton";
+  import { mnemonicToWalletKey } from "ton-crypto";
+  import { getHttpEndpoint } from "@orbs-network/ton-access";
+  import { contractAddress } from "./contract.config"; // Your Contract address
+
+  const MNEMONIC = process.env.MNEMONIC;
+
+  export default async function handler(req, res) {
+    if (req.method === "POST") {
+      try {
+        const { amount, recipient } = req.body;
+
+        const endpoint = await getHttpEndpoint();
+        const client = new TonClient({ endpoint });
+
+        const key = await mnemonicToWalletKey(MNEMONIC.split(" "));
+        const wallet = WalletContractV4.create({
+          publicKey: key.publicKey,
+          workchain: 0,
+        });
+
+        const seqno = await wallet.getSeqno(client);
+
+        const transfer = wallet.createTransfer({
+          secretKey: key.secretKey,
+          seqno: seqno,
+          messages: [
+            internal({
+              to: contractAddress, // Contract address
+              value: "0.1", // minimal value for gas fees
+              body: Cell.from("transfer", {
+                amount: amount,
+                recipient: new Address(recipient),
+              }).toBoc(), // Contract method
+            }),
+          ],
+        });
+        const signed = await wallet.sign(transfer);
+        const tx = await client.sendExternalMessage(wallet, signed);
+
+        res.status(200).json({ txHash: tx.hash });
+      } catch (error) {
+        console.error("Error minting tokens", error);
+        res.status(500).json({ error: "Failed to mint tokens" });
+      }
+    } else {
+      res.status(405).json({ error: "Method not allowed" });
+    }
+  }
+  ```
+
+- **pages/api/contract.config.js**
+
+  ```javascript
+  export const contractAddress =
+    "EQB59jZqI165y5Z36Y4-B5zZ5bJ0L3y8v7w1-N5g71f7dC04"; // Replace with your contract address
+  ```
+
+**Explanation:**
+
+- **`mintTokens` API:**
+  - Constructs a message that calls the `mint` method of the smart contract.
+  - Uses TON SDK to send the transaction.
+  - responds with the `txHash` of the blockchain transaction.
+- **`transferTokens` API:**
+  - Constructs a message that calls the `transfer` method of the smart contract.
+  - Uses TON SDK to send the transaction.
+  - responds with the `txHash` of the blockchain transaction.
+
+**Important Notes:**
+
+- **Contract Deployment:** You'll need to deploy your smart contract to the TON network.
+- **TON Connect:** The user must be connected with TonConnect to sign transactions.
+- **Cell and boc:** You'll use cells and boc for encoding parameters for the contract method.
+- **Gas Fees:** Make sure your transactions include enough gas to execute on the network.
+
+**5. Referral/Invite Systems**
+
+Here's an example of how you might implement a referral system using a database:
+
+- **Database Schema:**
+
+  Add new field for users table on prisma
+
+  ```prisma
+   model User {
+       id Int @id @default(autoincrement())
+        points  Int @default(0)
+        taps  Int @default(0)
+        upgradeLevel Int @default(0)
+        referredBy  Int? // Optional foreign key
+    }
+  ```
+
+- **Backend (Next.js API Route - `pages/api/referral.js`):**
+
+  ```javascript
+  // pages/api/referral.js
+  import { PrismaClient } from "@prisma/client";
+
+  const prisma = new PrismaClient();
+
+  export default async function handler(req, res) {
+    if (req.method === "POST") {
+      const { referrerId, referredId } = req.body; // Or get the referredId when the user connects their wallet
+
+      if (!referrerId || !referredId) {
+        return res
+          .status(400)
+          .json({ error: "Referrer and referred user IDs are required" });
+      }
+      try {
+        // Save the referred user info
+        await prisma.user.update({
+          where: { id: referredId },
+          data: {
+            referredBy: referrerId,
+          },
+        });
+
+        // Bonus points to referrer
+        await prisma.user.update({
+          where: { id: referrerId },
+          data: { points: { increment: 1000 } }, // Or your required bonus points for referrals
+        });
+
+        // Bonus points to referred user
+        await prisma.user.update({
+          where: { id: referredId },
+          data: { points: { increment: 500 } }, // Or your required bonus points for referrals
+        });
+
+        res.status(200).json({ message: "Referral recorded successfully" });
+      } catch (error) {
+        console.error("Error recording referral", error);
+        res.status(500).json({ error: "Failed to record referral" });
+      }
+    } else {
+      res.status(405).json({ error: "Method not allowed" });
+    }
+  }
+  ```
+
+- **Frontend (Mini App):**
+
+  When a user connects their wallet or creates a new account you can trigger this call to save their referral and get the bonus.
+
+**Important Notes:**
+
+- **Security:** Make sure that the user id is from a secure source to avoid manipulating referral bonuses.
+- **Input Validation:** Always validate input from the client before processing it on the server.
+- **Bonus Logic:** You can adjust the bonus logic as per your game's rules.
+
+Let me know if you'd like more details on any specific aspect of this.
+
+---
